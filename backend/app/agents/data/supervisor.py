@@ -63,32 +63,14 @@ def _process_document(app: Flask, llm, job_id: str, document_id: str, dataset_ve
             # needing its own row-label -> canonical-account mapping.
             map_results: list[AgentResult] = []
             if extract_result.status == Status.DONE and doc.doc_type in _NEEDS_MAPPING:
-                table_artifacts = [a for a in extract_result.outputs if a.kind == "table"]
-                if len(table_artifacts) <= 1:
-                    for artifact in table_artifacts:
-                        table_name = artifact.id.split(":", 1)[1] if ":" in artifact.id else None
-                        map_results.append(SchemaMapperAgent(llm).run(_make_spec(
-                            job, "schema_mapper",
-                            {"document_id": document_id, "dataset_version_id": dataset_version_id,
-                             "raw_table_uri": artifact.uri, "table_name": table_name,
-                             "user_guidance": mapper_guidance},
-                        )))
-                else:
-                    with ThreadPoolExecutor(max_workers=min(4, len(table_artifacts))) as tbl_pool:
-                        futures = [
-                            tbl_pool.submit(
-                                SchemaMapperAgent(llm).run,
-                                _make_spec(
-                                    job, "schema_mapper",
-                                    {"document_id": document_id, "dataset_version_id": dataset_version_id,
-                                     "raw_table_uri": artifact.uri, "table_name": artifact.id.split(":", 1)[1] if ":" in artifact.id else None,
-                                     "user_guidance": mapper_guidance},
-                                )
-                            )
-                            for artifact in table_artifacts
-                        ]
-                        for f in futures:
-                            map_results.append(f.result())
+                for artifact in [a for a in extract_result.outputs if a.kind == "table"]:
+                    table_name = artifact.id.split(":", 1)[1] if ":" in artifact.id else None
+                    map_results.append(SchemaMapperAgent(llm).run(_make_spec(
+                        job, "schema_mapper",
+                        {"document_id": document_id, "dataset_version_id": dataset_version_id,
+                         "raw_table_uri": artifact.uri, "table_name": table_name,
+                         "user_guidance": mapper_guidance},
+                    )))
             return {"document_id": document_id, "intake": intake_result, "extract": extract_result, "map": map_results}
         except Exception as exc:
             import logging
