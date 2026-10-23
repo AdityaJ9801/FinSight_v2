@@ -63,10 +63,6 @@ class ExtractorAgent(WorkerAgent):
                     return self._extract_bank(spec, doc, abs_path, dataset_version_id, is_excel=True)
                 elif ext in ("csv", "tsv", "txt"):
                     return self._extract_bank(spec, doc, abs_path, dataset_version_id, is_excel=False)
-                elif ext == "pdf":
-                    res = self._extract_bank(spec, doc, abs_path, dataset_version_id, is_excel=False)
-                    if res.status == Status.DONE and res.outputs and (getattr(res.outputs[0], "row_count", 0) or 0) > 0:
-                        return res
             if doc.doc_type in ("gstr_3b", "gstr_2b"):
                 if ext in ("xlsx", "xls"):
                     return self._extract_gst(spec, doc, abs_path, dataset_version_id, is_excel=True)
@@ -136,49 +132,9 @@ class ExtractorAgent(WorkerAgent):
             return RawTable(rows=raw_rows, periods=res.periods, name="ocr_table")
         return None
 
-    def _read_bank_pdf(self, abs_path: str) -> list[dict]:
-        import pdfplumber
-        from app.tools.parsers.csv_tool import _BANK_COLUMN_ALIASES, _find_column, _find_bank_header_row, clean_numeric
-        transactions = []
-        try:
-            with pdfplumber.open(abs_path) as pdf:
-                for page in pdf.pages[:30]:
-                    tables = page.extract_tables() or []
-                    for grid in tables:
-                        if not grid or len(grid) < 2:
-                            continue
-                        header_idx = _find_bank_header_row(grid)
-                        header = grid[header_idx]
-                        header_norm = [str(c).strip().lower() for c in header if c]
-                        cols = {key: _find_column(header_norm, aliases) for key, aliases in _BANK_COLUMN_ALIASES.items()}
-                        if cols.get("date") is None:
-                            continue
-                        for i, row in enumerate(grid[header_idx + 1:], start=header_idx + 2):
-                            if not any(c and str(c).strip() for c in row):
-                                continue
-                            def cell(r, k):
-                                idx = cols.get(k)
-                                return str(r[idx]).strip() if idx is not None and idx < len(r) and r[idx] else ""
-                            txn_date = cell(row, "date")
-                            narration = cell(row, "narration")
-                            if not txn_date and not narration:
-                                continue
-                            debit = clean_numeric(cell(row, "debit")) or 0.0
-                            credit = clean_numeric(cell(row, "credit")) or 0.0
-                            bal = clean_numeric(cell(row, "balance"))
-                            transactions.append({
-                                "row_idx": i, "txn_date": txn_date, "narration": narration,
-                                "debit": debit, "credit": credit, "balance": bal, "source_ref": {"row": i},
-                            })
-        except Exception:
-            pass
-        return transactions
-
     def _extract_bank(self, spec, doc, abs_path, dataset_version_id, is_excel: bool = False) -> AgentResult:
         if is_excel:
             transactions = self.call_tool("excel.read_bank", file_path=abs_path)
-        elif abs_path.lower().endswith(".pdf"):
-            transactions = self._read_bank_pdf(abs_path)
         else:
             transactions = self.call_tool("csv.read_bank", file_path=abs_path)
         count = 0

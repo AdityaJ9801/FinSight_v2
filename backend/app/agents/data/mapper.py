@@ -262,38 +262,15 @@ class SchemaMapperAgent(WorkerAgent):
         unit_scale = float(doc.unit_scale or 1)
 
         for i, row in enumerate(rows):
-            account_id, confidence, method = resolved.get(i, (UNMAPPED, 0.2, "fallback"))
+            account_id, confidence, method = resolved[i]
             if account_id == UNMAPPED:
-                # If row contains numeric values, rescue it as a general financial fact rather than dropping
-                norm_lbl = normalize_label(row.get("label", ""))
-                norm_sec = normalize_label(row.get("section", ""))
-                gen_acc = None
-
-                if any(k in norm_lbl for k in ("revenue", "sales", "income", "receipt", "billing", "turnover", "fee", "gain")) or any(k in norm_sec for k in ("revenue", "income")):
-                    gen_acc = "PL.REVENUE" if statement_hint == "PL" else "GEN.REVENUE"
-                elif any(k in norm_lbl for k in ("expense", "cost", "salary", "salaries", "wage", "rent", "tax", "fee", "marketing", "travel", "utility", "depreciation", "interest", "loss", "spending")) or any(k in norm_sec for k in ("expense", "cost")):
-                    gen_acc = "PL.OTHER_EXPENSES" if statement_hint == "PL" else "GEN.EXPENSE"
-                elif any(k in norm_lbl for k in ("asset", "cash", "bank", "inventory", "stock", "receivable", "debtor", "investment", "deposit", "property", "equipment")) or any(k in norm_sec for k in ("asset", "property")):
-                    gen_acc = "BS.CA.OTHER" if statement_hint == "BS" else "GEN.ASSET"
-                elif any(k in norm_lbl for k in ("liabilit", "payable", "creditor", "loan", "borrowing", "equity", "capital", "debt", "provision")) or any(k in norm_sec for k in ("liabilit", "equity", "capital")):
-                    gen_acc = "BS.CL.OTHER" if statement_hint == "BS" else "GEN.LIABILITY"
-                elif row.get("label") and any(clean_numeric(v) is not None for v in row.get("values", {}).values()):
-                    clean_id = _safe_name(row["label"]).upper().replace(" ", "_").strip("_")
-                    gen_acc = f"GEN.{clean_id}" if clean_id else "GEN.METRIC"
-
-                if gen_acc:
-                    account_id = gen_acc
-                    confidence = 0.75
-                    method = "general_fallback"
-                else:
-                    unmapped += 1
-                    if method == "llm" and confidence < self.REVIEW_THRESHOLD and role == "primary":
-                        low_confidence.append({"document_id": doc.id, "label": row["label"], "section": row.get("section"),
-                                               "suggested_account_id": None, "confidence": confidence,
-                                               "row_idx": row["row_idx"], "sheet_role": role})
-                    continue
-
-            if confidence < self.REVIEW_THRESHOLD and not account_id.startswith("GEN."):
+                unmapped += 1
+                if method == "llm" and confidence < self.REVIEW_THRESHOLD and role == "primary":
+                    low_confidence.append({"document_id": doc.id, "label": row["label"], "section": row.get("section"),
+                                           "suggested_account_id": None, "confidence": confidence,
+                                           "row_idx": row["row_idx"], "sheet_role": role})
+                continue
+            if confidence < self.REVIEW_THRESHOLD:
                 low_confidence.append({
                     "document_id": doc.id, "label": row["label"], "section": row.get("section"),
                     "suggested_account_id": account_id, "confidence": confidence, "row_idx": row["row_idx"],
@@ -306,8 +283,7 @@ class SchemaMapperAgent(WorkerAgent):
                 if period_end is None and doc.period_end:
                     period_end = doc.period_end
                 if period_end is None:
-                    curr_yr = doc.period_start.year if (doc and doc.period_start) else datetime.now().year
-                    period_end = date(curr_yr, 3, 31)
+                    continue
                 db.session.add(FinancialFact(
                     dataset_version=dataset_version_id, entity_id=doc.entity_id, account_id=account_id,
                     period_end=period_end, value=value * unit_scale, currency=doc.currency,

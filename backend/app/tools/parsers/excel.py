@@ -43,16 +43,9 @@ def _build_sheet_table(rows, header_row_idx: int, sheet_name: str) -> RawTable |
     if header_row_idx < 0 or header_row_idx >= len(rows):
         header_row_idx = 0
     header_row = rows[header_row_idx]
-
-    # Detect label column index: find first column with non-numeric text labels
-    label_col_idx = 0
-    if len(header_row) > 2 and len(rows) > header_row_idx + 1:
-        c0_vals = [str(rows[r][0].value or "").strip() for r in range(header_row_idx + 1, min(header_row_idx + 8, len(rows))) if len(rows[r]) > 0]
-        c1_vals = [str(rows[r][1].value or "").strip() for r in range(header_row_idx + 1, min(header_row_idx + 8, len(rows))) if len(rows[r]) > 1]
-        if all(v.isdigit() or not v or len(v) <= 3 for v in c0_vals) and any(clean_numeric(v) is None and len(v) > 3 for v in c1_vals):
-            label_col_idx = 1
-
-    active_cols = [(j, str(c.value).strip()) for j, c in enumerate(header_row) if j > label_col_idx and c.value not in (None, "")]
+    # (column index, period header) for the table currently being read. A later sub-table
+    # header row can replace it (new period columns) or suspend it (non-period columns).
+    active_cols = [(j, str(c.value).strip()) for j, c in enumerate(header_row) if j > 0 and c.value not in (None, "")]
     periods = [p for _, p in active_cols]
     if not periods:
         return None
@@ -60,15 +53,9 @@ def _build_sheet_table(rows, header_row_idx: int, sheet_name: str) -> RawTable |
     sections = SectionTracker()
     raw_rows: list[RawRow] = []
     for row in rows[header_row_idx + 1:]:
-        label_cell = row[label_col_idx] if label_col_idx < len(row) else row[0]
+        label_cell = row[0]
         if label_cell.value in (None, ""):
-            # Check if any cell before active_cols has non-numeric text
-            first_idx = active_cols[0][0] if active_cols else len(row)
-            text_candidate = next((c for c in row[:first_idx] if c.value not in (None, "") and clean_numeric(c.value) is None), None)
-            if text_candidate is not None:
-                label_cell = text_candidate
-            else:
-                continue
+            continue
         raw_label = str(label_cell.value)
         label = raw_label.strip()
         try:
