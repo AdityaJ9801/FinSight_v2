@@ -63,6 +63,8 @@ ENV FLASK_APP=run.py \
     DATABASE_URL=sqlite:////app/instance/finsight.db \
     STORAGE_ROOT=/app/instance/storage \
     LLM_BACKEND=auto \
+    LLM_FALLBACK_TO_FAKE=true \
+    RENDER=true \
     AUTO_APPROVE_LOW_CONFIDENCE=true
 
 EXPOSE 10000

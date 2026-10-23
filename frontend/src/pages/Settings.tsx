@@ -283,7 +283,7 @@ export function SettingsPage() {
                 type="text"
                 value={customBaseUrl}
                 onChange={(e) => setCustomBaseUrl(e.target.value)}
-                placeholder="http://host.docker.internal:8000/v1"
+                placeholder="http://host.docker.internal:8000/v1 or https://xxxx.ngrok-free.app/v1"
                 style={{
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontSize: "0.85rem",
@@ -295,6 +295,9 @@ export function SettingsPage() {
                   width: "100%",
                 }}
               />
+              <span className="small muted" style={{ display: "block", marginTop: "4px", fontSize: "0.72rem" }}>
+                For Render cloud deployments, expose local models with a public tunnel (e.g. <code>ngrok http 8000</code>).
+              </span>
             </div>
           </div>
 

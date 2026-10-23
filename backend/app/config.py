@@ -64,9 +64,15 @@ class Config:
     # do. Set explicitly ("fake" | "real" | "openai" | "gemini") to pin one regardless of
     # what keys are present. See app/llm_gateway/__init__.py's resolve_backend().
     LLM_BACKEND = os.environ.get("LLM_BACKEND", "auto")
-    LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:8000/v1")
+    IS_RENDER = _bool("RENDER", "false") or bool(os.environ.get("RENDER"))
+    _raw_base_url = os.environ.get("LLM_BASE_URL", "").strip()
+    if not _raw_base_url:
+        LLM_BASE_URL = "" if IS_RENDER else "http://localhost:8000/v1"
+    else:
+        LLM_BASE_URL = _raw_base_url
     LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
     LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "custom-model")
+    LLM_FALLBACK_TO_FAKE = _bool("LLM_FALLBACK_TO_FAKE", "true" if IS_RENDER else "false")
     LLM_EMBEDDINGS_ENABLED = _bool("LLM_EMBEDDINGS_ENABLED", "false")
 
     # NVIDIA NIM models

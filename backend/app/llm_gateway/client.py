@@ -137,6 +137,19 @@ class RealLLMGateway(LLMGateway):
                             except ValueError:
                                 pass
                         time.sleep(wait_s)
+        if last_error:
+            is_render = os.environ.get("RENDER", "").lower() in ("true", "1") or bool(os.environ.get("RENDER"))
+            base_lower = self.base_url.lower()
+            is_local = any(h in base_lower for h in ("localhost", "127.0.0.1", "host.docker.internal", "0.0.0.0"))
+            if is_render and is_local and isinstance(last_error, requests.exceptions.ConnectionError):
+                raise ConnectionError(
+                    f"Connection refused to '{self.base_url}'. When running on Render (in the cloud), "
+                    f"'localhost' refers to the cloud container, not your computer or external server. "
+                    f"To connect your custom model to Render: (1) Expose your model via a public tunnel "
+                    f"(e.g. ngrok: 'ngrok http 8000' -> 'https://xxxx.ngrok-free.app/v1', or Cloudflare Tunnel) "
+                    f"and set Custom Endpoint Base URL to that tunnel URL, or (2) Add an NVIDIA API Key in Settings "
+                    f"to use free NVIDIA NIM cloud models."
+                ) from last_error
         raise last_error
 
     def _invoke_chat(self, messages: list[dict], model: str | None = None, temperature: float | None = None,

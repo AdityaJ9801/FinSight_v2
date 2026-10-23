@@ -13,13 +13,46 @@ services:
     envVars:
       - key: PORT
         value: "10000"
+      - key: RENDER
+        value: "true"
       - key: LLM_BACKEND
         value: auto
+      - key: LLM_FALLBACK_TO_FAKE
+        value: "true"
       - key: FLASK_SECRET_KEY
         generateValue: true
       - key: AUTO_APPROVE_LOW_CONFIDENCE
         value: "true"
-      # Optional: Add your API keys in Render dashboard environment settings
+
+      # =========================================================================
+      # Custom Freely-Deployed Model (e.g. vLLM, Ollama, remote server endpoint)
+      # CRITICAL NOTE FOR RENDER CLOUD:
+      # Do NOT use "http://localhost:8000/v1" on Render!
+      # In the cloud, "localhost" refers to the Render container itself, not your server.
+      # To connect your model to Render, expose it with a public URL:
+      # - ngrok: ngrok http 8000 -> use "https://xxxx.ngrok-free.app/v1"
+      # - Cloudflare Tunnel -> use "https://xxxx.trycloudflare.com/v1"
+      # - Public IP / Domain: "https://your-server.com/v1" or "http://your.ip:8000/v1"
+      # =========================================================================
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL_NAME
+        value: "Qwen/Qwen3-14B"
+      - key: LLM_API_KEY
+        sync: false
+
+      # =========================================================================
+      # NVIDIA NIM Microservices (Free cloud inference credits at build.nvidia.com)
+      # Works out of the box in the cloud without needing a local GPU server!
+      # =========================================================================
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_BASE_URL
+        value: "https://integrate.api.nvidia.com/v1"
+      - key: NVIDIA_MODEL_NAME
+        value: "nvidia/nemotron-3.5-super-vl-120b-a12b"
+
+      # Optional Cloud Providers
       - key: OPENAI_API_KEY
         sync: false
       - key: GEMINI_API_KEY

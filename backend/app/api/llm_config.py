@@ -270,11 +270,28 @@ def test_model():
     except Exception as exc:
         duration_ms = round((time.monotonic() - started) * 1000, 2)
         current_app.logger.warning("LLM test failed: %s", exc)
+        err_msg = str(exc)
+        is_render = os.environ.get("RENDER", "").lower() in ("true", "1") or bool(os.environ.get("RENDER"))
+        if "localhost" in err_msg or "127.0.0.1" in err_msg or "Errno 111" in err_msg:
+            if is_render:
+                err_msg = (
+                    "Connection refused to localhost:8000. When deployed on Render (in the cloud), "
+                    "'localhost' refers to the Render cloud container, not your computer or server. "
+                    "To connect your custom model: (1) Expose your server using a public URL "
+                    "(e.g. ngrok: 'ngrok http 8000' -> use 'https://xxxx.ngrok-free.app/v1', or Cloudflare Tunnel), "
+                    "or (2) Set your public server IP/domain in Render Environment Variables -> LLM_BASE_URL, "
+                    "or (3) Add an NVIDIA API Key in Settings for free NVIDIA NIM cloud inference."
+                )
+            else:
+                err_msg = (
+                    "Connection refused to localhost:8000. Make sure your local model server (e.g., vLLM, Ollama, LM Studio) "
+                    "is running and listening on port 8000."
+                )
         return jsonify({
             "success": False,
             "status": "error",
             "backend": backend,
-            "error": str(exc),
+            "error": err_msg,
             "latency_ms": duration_ms,
         }), 400
 
