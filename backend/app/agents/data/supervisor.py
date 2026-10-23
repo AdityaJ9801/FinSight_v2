@@ -23,7 +23,10 @@ from app.models.review import ReviewItem
 from app.utils.ids import new_id
 
 # doc types with a raw-table -> canonical-CoA mapping step; bank/GST write facts directly.
-_NEEDS_MAPPING = {"balance_sheet", "pnl", "trial_balance", "other", "ageing_ar", "ageing_ap", "loan_schedule", "inventory"}
+_NEEDS_MAPPING = {
+    "balance_sheet", "pnl", "trial_balance", "cash_flow", "bank_statement",
+    "gstr_3b", "gstr_2b", "other", "ageing_ar", "ageing_ap", "loan_schedule", "inventory"
+}
 # Statuses that mean "this document's work for the data stage is already done" -- checked
 # on resume (e.g. after a human review correction) so we don't redo intake/extract/map,
 # only reconciliation, which is what the correction actually needs re-run (§6.10 resumability).
@@ -62,17 +65,19 @@ def _process_document(app: Flask, llm, job_id: str, document_id: str, dataset_ve
             # PDF with several tables) yields one output artifact per sheet/table, each
             # needing its own row-label -> canonical-account mapping.
             map_results: list[AgentResult] = []
-            if extract_result.status == Status.DONE and doc.doc_type in _NEEDS_MAPPING:
+            if extract_result.status == Status.DONE:
                 table_artifacts = [a for a in extract_result.outputs if a.kind == "table"]
-                if len(table_artifacts) <= 1:
-                    for artifact in table_artifacts:
-                        table_name = artifact.id.split(":", 1)[1] if ":" in artifact.id else None
-                        map_results.append(SchemaMapperAgent(llm).run(_make_spec(
-                            job, "schema_mapper",
-                            {"document_id": document_id, "dataset_version_id": dataset_version_id,
-                             "raw_table_uri": artifact.uri, "table_name": table_name,
-                             "user_guidance": mapper_guidance},
-                        )))
+                has_direct_data = any(a.kind == "dataset" and (getattr(a, "row_count", 0) or 0) > 0 for a in extract_result.outputs)
+                if table_artifacts and not has_direct_data:
+                    if len(table_artifacts) <= 1:
+                        for artifact in table_artifacts:
+                            table_name = artifact.id.split(":", 1)[1] if ":" in artifact.id else None
+                            map_results.append(SchemaMapperAgent(llm).run(_make_spec(
+                                job, "schema_mapper",
+                                {"document_id": document_id, "dataset_version_id": dataset_version_id,
+                                 "raw_table_uri": artifact.uri, "table_name": table_name,
+                                 "user_guidance": mapper_guidance},
+                            )))
                 else:
                     with ThreadPoolExecutor(max_workers=min(4, len(table_artifacts))) as tbl_pool:
                         futures = [
@@ -175,6 +180,56 @@ class DataSupervisor:
             + GstReturn.query.filter_by(dataset_version=dataset_version_id).count()
             + structured_rows
         )
+        if usable_rows == 0:
+            # Fact rescue safeguard: convert any extracted raw table rows directly into FinancialFacts
+            import json
+            from datetime import date, datetime
+            from app.utils import storage
+
+            rescued_count = 0
+            for r in results:
+                doc_id = r.get("document_id")
+                d_obj = Document.query.get(doc_id) if doc_id else None
+                ext_res = r.get("extract")
+                if not ext_res or not ext_res.outputs:
+                    continue
+                for art in ext_res.outputs:
+                    if art.kind != "table":
+                        continue
+                    try:
+                        p = storage.resolve(art.uri)
+                        if not p.exists():
+                            continue
+                        tbl_data = json.loads(p.read_text())
+                        tbl_rows = tbl_data.get("rows", [])
+                        curr_yr = d_obj.period_start.year if (d_obj and d_obj.period_start) else datetime.now().year
+                        default_period = (d_obj.period_end if d_obj and d_obj.period_end else None) or date(curr_yr, 3, 31)
+                        for row in tbl_rows:
+                            lbl = (row.get("label") or "").strip()
+                            vals = row.get("values") or {}
+                            if not lbl or not vals:
+                                continue
+                            clean_acc = f"GEN.{lbl[:35].upper().replace(' ', '_')}"
+                            for p_str, v in vals.items():
+                                try:
+                                    num_val = float(v)
+                                except (TypeError, ValueError):
+                                    continue
+                                db.session.add(FinancialFact(
+                                    dataset_version=dataset_version_id, entity_id=d_obj.entity_id if d_obj else "e_default",
+                                    account_id=clean_acc, period_end=default_period, value=num_val,
+                                    currency=d_obj.currency if d_obj else "INR", source_doc=d_obj.id if d_obj else "",
+                                    source_ref={"source": "rescue_table", "row": row.get("row_idx", 0)},
+                                    confidence=0.75,
+                                ))
+                                rescued_count += 1
+                    except Exception as exc:
+                        self.app.logger.warning("Fact rescue exception: %s", exc)
+
+            if rescued_count > 0:
+                db.session.commit()
+                usable_rows = FinancialFact.query.filter_by(dataset_version=dataset_version_id).count()
+
         if usable_rows == 0:
             if "NO_FACTS" in accepted_checks:
                 # A reviewer already acknowledged this and re-running changed nothing, so

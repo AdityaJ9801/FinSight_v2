@@ -89,6 +89,12 @@ CANONICAL_ACCOUNTS: list[tuple[str, str, str, str | None, str]] = [
     # cash flows, which counted acquisitions of subsidiaries and financial investments as
     # if they were capex.
     ("CF.CAPEX", "Capital Expenditure (Purchase of PPE and Intangibles)", "CF", None, "credit"),
+    # General / dynamic financial accounts for universal non-predefined data
+    ("GEN.REVENUE", "General Revenue / Sales", "PL", None, "credit"),
+    ("GEN.EXPENSE", "General Operating Expense", "PL", None, "debit"),
+    ("GEN.ASSET", "General Asset", "BS", None, "debit"),
+    ("GEN.LIABILITY", "General Liability", "BS", None, "credit"),
+    ("GEN.METRIC", "General Financial Metric", "PL", None, "credit"),
 ]
 
 # normalized source label -> canonical account id. Extend freely; this is the "memory
@@ -140,16 +146,36 @@ LABEL_SYNONYMS: dict[str, str] = {
     "total equity and liabilities": "BS.TOTAL_EQUITY_LIAB",
     "total liabilities and equity": "BS.TOTAL_EQUITY_LIAB",
     "revenue from operations": "PL.REVENUE",
+    "revenue": "PL.REVENUE",
     "net sales": "PL.REVENUE",
     "sales": "PL.REVENUE",
     "turnover": "PL.REVENUE",
     "gross revenue": "PL.REVENUE",
+    "net revenue": "PL.REVENUE",
+    "total sales": "PL.REVENUE",
     "operating revenue": "PL.REVENUE",
     "gross receipts": "PL.REVENUE",
     "top line": "PL.REVENUE",
     "other income": "PL.OTHER_INCOME",
     "total income": "PL.TOTAL_INCOME",
     "total revenue": "PL.TOTAL_INCOME",
+    "operating expenses": "PL.OTHER_EXPENSES",
+    "operating expense": "PL.OTHER_EXPENSES",
+    "total operating expenses": "PL.OTHER_EXPENSES",
+    "general and administrative": "PL.OTHER_EXPENSES",
+    "general & administrative": "PL.OTHER_EXPENSES",
+    "sg&a": "PL.OTHER_EXPENSES",
+    "sga": "PL.OTHER_EXPENSES",
+    "operating profit": "PL.EBITDA",
+    "operating income": "PL.EBITDA",
+    "ebit": "PL.EBITDA",
+    "net income": "PL.PAT",
+    "net profit": "PL.PAT",
+    "net earnings": "PL.PAT",
+    "profit": "PL.PAT",
+    "expenses": "PL.OTHER_EXPENSES",
+    "expense": "PL.OTHER_EXPENSES",
+    "costs": "PL.COGS",
     "cost of materials consumed": "PL.COGS",
     "cost of goods sold": "PL.COGS",
     "cogs": "PL.COGS",
@@ -529,13 +555,21 @@ _SUPPORTING_SHEET_WORDS = ("ageing", "aging", "schedule", "note", "inventor", "l
                            "record", "transaction", "detail")
 
 
+_GENERIC_SHEET_NAMES = {
+    "sheet1", "sheet2", "sheet3", "sheet", "data", "table", "table_1", "table_2",
+    "csv", "summary", "financial_summary", "records", "financials", "accounts",
+    "statement", "statements", "general", "report", "main"
+}
+
+
 def sheet_role(table_name: str | None, doc_type: str | None, rule_hits: set[str]) -> str:
     """'primary' for a sheet/table that IS a financial statement, 'supporting' otherwise.
     Decided by sheet name first, then by whether its rows contain a statement's defining
-    totals (a sheet that states Total Assets / PAT / Net cash from operations is a statement)."""
+    totals."""
     if infer_statement_hint(table_name):
         return "primary"
     name = (table_name or "").strip().lower()
+    # Explicit supporting schedules
     if name and any(w in name for w in _SUPPORTING_SHEET_WORDS):
         return "supporting"
     anchors = {"BS.TOTAL_ASSETS", "BS.TOTAL_EQUITY_LIAB", "PL.PAT", "PL.PBT", "PL.REVENUE", "CF.OPERATING",
@@ -545,13 +579,16 @@ def sheet_role(table_name: str | None, doc_type: str | None, rule_hits: set[str]
     core_statement_accounts = {
         "BS.EQ.SHARE_CAPITAL", "BS.EQ.RESERVES", "BS.CL.TRADE_PAYABLES", "BS.CA.INVENTORY",
         "BS.CA.TRADE_RECEIVABLES", "BS.CA.CASH", "PL.REVENUE", "PL.COGS", "PL.EMPLOYEE_COST",
-        "PL.OTHER_EXPENSES", "PL.DEPRECIATION", "PL.PAT", "PL.PBT"
+        "PL.OTHER_EXPENSES", "PL.DEPRECIATION", "PL.PAT", "PL.PBT", "GEN.REVENUE", "GEN.EXPENSE"
     }
-    if len(rule_hits & core_statement_accounts) >= 2:
+    if len(rule_hits & core_statement_accounts) >= 1:
         return "primary"
-    if doc_type in ("balance_sheet", "pnl", "cash_flow", "trial_balance") and not name:
-        return "primary"  # a single-table CSV/PDF classified as a statement
-    return "supporting"
+    # Generic sheet names, single tables, or standard document types default to primary
+    if not name or name in _GENERIC_SHEET_NAMES or any(name.startswith(g) for g in ("sheet", "table", "data")):
+        return "primary"
+    if doc_type in ("balance_sheet", "pnl", "cash_flow", "trial_balance", "other"):
+        return "primary"
+    return "primary"
 
 
 def lookup_prefix_synonym(label: str, statement_hint: str | None = None) -> str | None:

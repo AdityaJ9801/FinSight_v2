@@ -38,16 +38,32 @@ def _parse_grid_to_tables(grid: list[list[str]], name: str) -> list[RawTable]:
         return parse_columnar_dataset(grid, header_idx, name=name)
 
     header = grid[header_idx]
-    active_cols = [(j, str(c).strip()) for j, c in enumerate(header) if j > 0 and c]
+
+    # Detect label column index: find first column with non-numeric text labels
+    label_col_idx = 0
+    if len(header) > 2 and len(grid) > header_idx + 1:
+        c0_vals = [str(grid[r][0] or "").strip() for r in range(header_idx + 1, min(header_idx + 8, len(grid))) if len(grid[r]) > 0]
+        c1_vals = [str(grid[r][1] or "").strip() for r in range(header_idx + 1, min(header_idx + 8, len(grid))) if len(grid[r]) > 1]
+        if all(v.isdigit() or not v or len(v) <= 3 for v in c0_vals) and any(clean_numeric(v) is None and len(v) > 3 for v in c1_vals):
+            label_col_idx = 1
+
+    active_cols = [(j, str(c).strip()) for j, c in enumerate(header) if j > label_col_idx and c]
     periods = [p for _, p in active_cols]
     if not periods:
         return []
 
     raw_rows: list[RawRow] = []
     for r_idx, row in enumerate(grid[header_idx + 1:], start=1):
-        if not row or not str(row[0]).strip():
+        if not row:
             continue
-        label = str(row[0]).strip()
+        label = str(row[label_col_idx]).strip() if label_col_idx < len(row) and str(row[label_col_idx]).strip() else ""
+        if not label:
+            first_idx = active_cols[0][0] if active_cols else len(row)
+            first_text = next((str(c).strip() for j, c in enumerate(row[:first_idx]) if str(c).strip() and clean_numeric(c) is None), "")
+            if not first_text:
+                continue
+            label = first_text
+
         values: dict[str, float] = {}
         for j, period in active_cols:
             if j >= len(row) or row[j] is None:
